@@ -422,11 +422,11 @@ def choose_task(request, *args, **kwargs):
         employee_comment=comment,
         admin_id=admin_id  # Устанавливаем admin_id при создании employee_task
     )
-    if employee_task.start_time is None:
-        employee_task.start_time = datetime.now()
+    # if employee_task.start_time is None:
+    #     employee_task.start_time = datetime.now()
 
-    # if employee_task.end_time is None:
-    #     employee_task.end_time = datetime.now()
+    # # if employee_task.end_time is None:
+    # #     employee_task.end_time = datetime.now()
 
     
 
