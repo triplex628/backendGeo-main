@@ -220,7 +220,7 @@ class TaskHandlerView(APIView):
         start_time = tracking_task.start_time if tracking_task.start_time else timezone.now()
         end_time = tracking_task.end_time if tracking_task.end_time else timezone.now() 
 
-        time = employee_task.total_time + end_time - start_time
+        time = employee_task.total_time + int((end_time - start_time).total_seconds())
 
         data = {
             "time": time.total_seconds(),
@@ -299,7 +299,7 @@ class TaskHandlerView(APIView):
                 employee_task.is_started = False
 
                 employee_task.end_time = end_time
-                employee_task.total_time += tracking_task.end_time - tracking_task.start_time
+                employee_task.total_time += int((tracking_task.end_time - tracking_task.start_time).total_seconds())
                 employee.status =False
 
                 employee.save()
@@ -315,7 +315,7 @@ class TaskHandlerView(APIView):
                 
                 employee_task.is_paused = True
                 employee_task.paused_message = f"{pause_message}"
-                employee_task.total_time += tracking_task.end_time - tracking_task.start_time
+                employee_task.total_time += int((tracking_task.end_time - tracking_task.start_time).total_seconds())
                 employee_task.save()
 
                 return Response({"message": f"{employee_task} ---- {pause_message} has been paused"}, status=status.HTTP_200_OK)
