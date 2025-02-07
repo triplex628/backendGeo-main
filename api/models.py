@@ -227,7 +227,7 @@ class EmployeeTaskModel(models.Model):
     item = models.ForeignKey(ItemModel, verbose_name="ID прибора", null=True, blank=True, on_delete=models.CASCADE)
     admin = models.ForeignKey(AdminModel, verbose_name="ID администратора", null=True, blank=True, on_delete=models.CASCADE)
     useful_time = models.IntegerField(verbose_name="Полезное время", default=0) 
-    last_start_time = models.DateTimeField(verbose_name="Начало полезного времени", default=timedelta(0))    
+    last_start_time = models.DateTimeField(verbose_name="Начало полезного времени", default=None)    
     rework_time = models.IntegerField(verbose_name="Время переделки", default=0)  
     non_working_time = models.IntegerField(verbose_name="Внерабочее время", default=0)
     last_rework_start = models.DateTimeField(verbose_name="Время начала переделки", null=True, blank=True)  
@@ -239,8 +239,16 @@ class EmployeeTaskModel(models.Model):
         return f"{self.task} {self.employee}"
     
     def save(self, *args, **kwargs):
+        
         if not self.employee_comment:
             self.employee_comment = "нет комментария"
+
+        print(f"DEBUG: total_time = {self.total_time} ({type(self.total_time)})")
+    
+        # Если total_time в формате timedelta, конвертируем в int (секунды)
+        if isinstance(self.total_time, timedelta):
+            self.total_time = int(self.total_time.total_seconds())
+        
         super().save(*args, **kwargs)
 
     class Meta:

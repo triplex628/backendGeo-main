@@ -69,7 +69,15 @@ class EmployeeTaskSerializer(serializers.ModelSerializer):
         return f"{obj.task.title}"
     
     def get_total_time(self, obj):
-        return obj.total_time
+        
+        if isinstance(obj.total_time, int):
+            return obj.total_time
+        
+        elif isinstance(obj.total_time, timedelta):
+            return int(obj.total_time.total_seconds())
+       
+        return 0  
+
 
 
 class TrackingTaskSerializer(serializers.ModelSerializer):

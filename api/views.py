@@ -21,6 +21,8 @@ from traceback import format_exc
 from django.views.decorators.csrf import csrf_exempt
 
 
+
+
 class EmployeeView(ListCreateAPIView, RetrieveUpdateDestroyAPIView):
     queryset = models.EmployeeModel.objects.all()
     serializer_class = serializers.EmployeeSerializer
@@ -408,10 +410,10 @@ def choose_task(request, *args, **kwargs):
 
     employee_task = models.EmployeeTaskModel.objects.filter(employee=employee, is_finished=False).first()
 
-    if employee_task is not None:
-        serializer = serializers.EmployeeTaskSerializer(employee_task)
-        serialized_data = serializer.data
-        return Response(data={"message": f"Task is already assigned to {serialized_data}"}, status=status.HTTP_409_CONFLICT)
+    # if employee_task is not None:
+    #     serializer = serializers.EmployeeTaskSerializer(employee_task)
+    #     serialized_data = serializer.data
+    #     return Response(data={"message": f"Task is already assigned to {serialized_data}"}, status=status.HTTP_409_CONFLICT)
 
     employee_task = models.EmployeeTaskModel(
         employee=employee,
@@ -420,8 +422,17 @@ def choose_task(request, *args, **kwargs):
         employee_comment=comment,
         admin_id=admin_id  # Устанавливаем admin_id при создании employee_task
     )
+    if employee_task.start_time is None:
+        employee_task.start_time = datetime.now()
+
+    # if employee_task.end_time is None:
+    #     employee_task.end_time = datetime.now()
+
+    
+
 
     employee_task.save()
+
     serializer = serializers.EmployeeTaskSerializer(employee_task)
     serialized_data = serializer.data
 
