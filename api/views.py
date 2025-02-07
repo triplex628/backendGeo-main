@@ -1,20 +1,24 @@
-import datetime
+import json
 
+from datetime import datetime, time, timedelta
+from django.utils.dateparse import parse_date
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate
 from django.utils import timezone
-
+from django.http import JsonResponse
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, ListAPIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.views import APIView
-
+from django.utils.timezone import now
 from . import models
 from . import serializers
 
-from utils.report_generator import ReportGenerator
+from utils.report_generator import ReportGenerator, generate_single_report
 from .models import AdminModel, EmployeeTaskModel, ItemModel, EmployeeModel, TaskModel
+from traceback import format_exc
+from django.views.decorators.csrf import csrf_exempt
 
 
 class EmployeeView(ListCreateAPIView, RetrieveUpdateDestroyAPIView):
@@ -356,7 +360,7 @@ class EmployeeTaskView(ListAPIView):
 
         if tracking_task.end_time is None:
             end_time = timezone.now() 
-            time = employee_task.total_time + end_time - tracking_task.start_time
+            time = (employee_task.total_time or 0) + int((end_time - tracking_task.start_time).total_seconds())
             employee_task.total_time = time
         
         serializer = self.get_serializer(employee_task)
@@ -438,28 +442,61 @@ def sign_in(request, *args, **kwargs):
 
 @api_view(['GET'])
 def generate_report(request, *args, **kwargs):
-    # for production
-    start_time = timezone.datetime.strptime(request.query_params.get('start_time'), '%Y-%m-%d')
-    end_time = timezone.datetime.strptime(request.query_params.get('end_time'), '%Y-%m-%d')
-    end_time = end_time.replace(hour=23, minute=59, second=59)
-    # Get the admin ID from request parameters (assuming it's passed as a query parameter)
- 
-    # for testing
-    # start_time = timezone.datetime.strptime(request.query_params.get('start_time'), "%Y-%m-%dT%H:%M:%S.%fZ")
-    # end_time = timezone.datetime.strptime(request.query_params.get('end_time'), "%Y-%m-%dT%H:%M:%S.%fZ")
+    """
+    Эндпоинт для генерации отчета.
+    """
+    try:
+        # Получение временных рамок из запроса
+        start_time = timezone.datetime.strptime(request.query_params.get('start_time'), '%Y-%m-%d')
+        end_time = timezone.datetime.strptime(request.query_params.get('end_time'), '%Y-%m-%d')
+        end_time = end_time.replace(hour=23, minute=59, second=59)
+        print(f"Генерация отчета с {start_time} по {end_time}")
 
-    employee_tasks = models.EmployeeTaskModel.objects.filter(start_time__gte=start_time, end_time__lte=end_time)
+        # Создание объекта ReportGenerator
+        report_generator = ReportGenerator()
 
+        # Генерация отчета
+        response = report_generator.generate_report(start_time, end_time)
+        return response
+    except Exception as e:
+        # Вывод подробной информации об ошибке
+        print("Ошибка в generate_report:")
+        print(format_exc())  # Вывод полного стека ошибки
+        return Response({"error": f"Failed to generate report: {str(e)}"}, status=500)
 
+@api_view(['GET'])
+def generate_single_report(request):
+    """
+    Эндпоинт для генерации и скачивания отчета по задачам с фильтрацией по дате.
+    """
+    # Получение начальной и конечной даты из параметров запроса
+    start_time = request.GET.get('start_time')
+    end_time = request.GET.get('end_time')
 
-    report_generator = ReportGenerator()
-#    report_generator.upload_items()
-    response = report_generator.generate_report(employee_tasks)
+    # Проверка корректности дат
+    if not start_time or not end_time:
+        return Response({"error": "Both 'start_time' and 'end_time' are required."}, status=400)
 
-    return response
-    # return Response({"message": "hello"}, status=status.HTTP_200_OK)
+    try:
+        start_time = parse_date(start_time)
+        end_time = parse_date(end_time)
 
+        if not start_time or not end_time:
+            raise ValueError("Invalid date format.")
+    except ValueError:
+        return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
 
+    # Фильтрация задач по дате
+    employee_tasks = EmployeeTaskModel.objects.filter(
+        start_time__date__gte=start_time,
+        start_time__date__lte=end_time
+    )
+
+    if not employee_tasks.exists():
+        return Response({"error": "No tasks found for the given date range."}, status=404)
+
+    # Генерация отчета и возврат HTTP-ответа
+    return generate_zalup_report(employee_tasks)
 
 @api_view(['POST'])
 def create_employee_task(request):
@@ -564,3 +601,300 @@ class EmployeeAuthView(APIView):
         except EmployeeModel.DoesNotExist:
             # Ошибка аутентификации
             return Response({'error': 'Неверное имя, фамилия или PIN-код.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(['POST'])
+def check_shift(request):
+    """
+    Проверяет время вызова относительно рабочей смены сотрудника.
+    Если вызов сделан вне смены, записывает время в last_non_working_start.
+    """
+    try:
+        # Получаем данные из тела запроса
+        task_id = request.data.get('task_id')
+
+        if not task_id:
+            return Response({"error": "task_id is required in the request body."}, status=400)
+
+        # Получаем задачу по ID
+        employee_task = EmployeeTaskModel.objects.get(id=task_id)
+        employee = employee_task.employee  # Сотрудник, связанный с задачей
+
+        # Текущее время
+        current_time = now().time()
+
+        # Проверяем наличие начала и конца смены у сотрудника
+        if employee.shift_start and employee.shift_end:
+            # Если вызов сделан в рабочее время
+            if employee.shift_start <= current_time <= employee.shift_end:
+                return Response({"message": "Смена еще не закончилась."}, status=200)
+            else:
+                # Вызов сделан вне рабочей смены
+                if not employee_task.last_non_working_start:
+                    employee_task.last_non_working_start = now()  # Записываем текущее время как начало
+                employee_task.save()
+                return Response(
+                    {"message": "Время вызова записано в last_non_working_start."},
+                    status=200
+                )
+        else:
+            return Response({"error": "У сотрудника не задана смена."}, status=400)
+    except EmployeeTaskModel.DoesNotExist:
+        return Response({"error": "Задача не найдена."}, status=404)
+    except AttributeError:
+        return Response({"error": "У задачи отсутствует связанный сотрудник."}, status=400)
+
+
+
+@api_view(['POST'])
+def stop_non_working_time(request):
+    """
+    Останавливает таймер внерабочего времени и записывает его результаты в базу данных.
+    """
+    try:
+        # Получаем данные из тела запроса
+        task_id = request.data.get('task_id')
+
+        if not task_id:
+            return Response({"error": "task_id is required in the request body."}, status=400)
+
+        # Получаем задачу по ID
+        employee_task = EmployeeTaskModel.objects.get(id=task_id)
+
+        # Проверяем, был ли таймер внерабочего времени запущен
+        if not employee_task.last_non_working_start:
+            return Response({"error": "Non-working time timer is not running."}, status=400)
+
+        # Вычисляем продолжительность внерабочего времени
+        start_time = employee_task.last_non_working_start
+        end_time = now()
+        non_working_duration = end_time - start_time
+        non_working_seconds = int(non_working_duration.total_seconds())
+
+        # Обновляем общее время внерабочей деятельности
+        if employee_task.non_working_time is None:
+            employee_task.non_working_time = 0  # Если поле пустое, инициализируем его
+        employee_task.non_working_time += non_working_seconds  # Добавляем время в секундах
+
+        # Сбрасываем last_non_working_start
+        employee_task.last_non_working_start = None
+        employee_task.save()
+
+        # Формируем ответ
+        hours, remainder = divmod(non_working_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        formatted_duration = f"{hours:02}:{minutes:02}:{seconds:02}"
+
+        return Response(
+            {
+                "message": "Non-working time timer stopped.",
+                "duration": formatted_duration,
+                "total_non_working_time_seconds": employee_task.non_working_time,
+            },
+            status=200
+        )
+
+    except EmployeeTaskModel.DoesNotExist:
+        return Response({"error": "Task not found."}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+
+@api_view(['POST'])
+def end_task(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            task_id = data.get('task_id')
+
+            
+            if not task_id:
+                return JsonResponse({"error": "task_id is required"}, status=400)
+
+            
+            task = TaskModel.objects.filter(id=task_id).first()
+            if not task:
+                return JsonResponse({"error": "Task not found"}, status=404)
+
+            
+            if not task.created_at or not task.finished_at:
+                return JsonResponse({"error": "Task does not have valid timestamps"}, status=400)
+
+            
+            time_difference = task.finished_at - task.created_at
+
+            
+            employee_task = EmployeeTaskModel.objects.filter(task=task).first()
+            if not employee_task:
+                return JsonResponse({"error": "EmployeeTaskModel not found for the given task"}, status=404)
+
+            
+            total_seconds = time_difference.total_seconds()
+            total_time = timedelta(seconds=total_seconds)
+            employee_task.total_time = total_time
+            employee_task.save()
+
+            return JsonResponse({"message": "Task time updated successfully"}, status=200)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)
+
+
+@api_view(['POST'])
+def start_rework(request):
+    """
+    Начало переделки: сохраняет время начала переделки в поле last_rework_start.
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            task_id = data.get('task_id')
+
+            if not task_id:
+                return JsonResponse({"error": "task_id is required"}, status=400)
+
+            # Получение записи EmployeeTaskModel
+            employee_task = EmployeeTaskModel.objects.filter(id=task_id).first()
+            if not employee_task:
+                return JsonResponse({"error": "EmployeeTaskModel not found"}, status=404)
+
+            # Установка времени начала переделки
+            current_time = timezone.now()
+            employee_task.last_rework_start = current_time
+            if not employee_task.is_paused:
+                time_difference = current_time - employee_task.last_start_time
+                time_difference_seconds = int(time_difference.total_seconds())
+                employee_task.useful_time += time_difference_seconds
+                employee_task.last_start_time = None
+            employee_task.save()
+
+            return JsonResponse({"message": "Rework started successfully"}, status=200)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)
+
+
+@api_view(['POST'])
+def end_rework(request):
+    """
+    Конец переделки: вычисляет длительность переделки и обновляет общее время.
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            task_id = data.get('task_id')
+
+            if not task_id:
+                return JsonResponse({"error": "task_id is required"}, status=400)
+
+            # Получение записи EmployeeTaskModel
+            employee_task = EmployeeTaskModel.objects.filter(id=task_id).first()
+            if not employee_task:
+                return JsonResponse({"error": "EmployeeTaskModel not found"}, status=404)
+
+            if not employee_task.last_rework_start:
+                return JsonResponse({"error": "Rework start time not set"}, status=400)
+
+            # Установка времени окончания переделки
+            currnt_time = timezone.now()
+            employee_task.last_rework_end = currnt_time
+
+            # Вычисление разницы времени
+            
+            time_difference = employee_task.last_rework_end - employee_task.last_rework_start
+            time_difference_seconds = int(time_difference.total_seconds())
+
+            # Обновление общего времени переделки
+            employee_task.rework_time += time_difference_seconds
+            employee_task.last_rework_start = None  # Сбрасываем время начала
+            employee_task.last_rework_end = None  # Сбрасываем время окончания
+            employee_task.save()
+
+            return JsonResponse({"message": "Rework ended successfully"}, status=200)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)
+
+@api_view(['POST'])
+def start_useful_time(request):
+    """
+    Запускает таймер полезного времени (is_started = True).
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            task_id = data.get('task_id')
+
+            if not task_id:
+                return JsonResponse({"error": "task_id is required"}, status=400)
+
+            employee_task = EmployeeTaskModel.objects.filter(id=task_id).first()
+            if not employee_task:
+                return JsonResponse({"error": "EmployeeTaskModel not found"}, status=404)
+
+            # Проверка условий
+            if employee_task.is_finished:
+                return JsonResponse({"error": "Task cannot be started as it is finished"}, status=400)
+
+            # Запуск таймера
+            if not employee_task.is_started:
+                employee_task.is_started = True
+                employee_task.is_pauseed = False
+                employee_task.last_start_time = timezone.now()  
+                #employee_task.start_time = timezone.now()
+                employee_task.save()
+
+            return JsonResponse({"message": "Useful time started successfully"}, status=200)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)
+
+
+@api_view(['POST'])
+def stop_useful_time(request):
+    """
+    Останавливает таймер полезного времени (is_started = False).
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            task_id = data.get('task_id')
+
+            if not task_id:
+                return JsonResponse({"error": "task_id is required"}, status=400)
+
+            employee_task = EmployeeTaskModel.objects.filter(id=task_id).first()
+            if not employee_task:
+                return JsonResponse({"error": "EmployeeTaskModel not found"}, status=404)
+
+            # Проверка состояния
+            if not employee_task.is_started:
+                return JsonResponse({"error": "Useful time is not started"}, status=400)
+
+            # Остановка таймера
+            current_time = timezone.now()
+            time_difference = current_time - employee_task.last_start_time
+            time_difference_seconds = int(time_difference.total_seconds())
+
+
+            # Обновление общего полезного времени
+            employee_task.useful_time += time_difference_seconds
+            employee_task.is_started = False
+            #employee_task.is_paused = True
+            employee_task.last_start_time = None  # Сбрасываем время последнего запуска
+            employee_task.save()
+
+            return JsonResponse({"message": "Useful time stopped successfully"}, status=200)
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    return JsonResponse({"error": "Invalid request method"}, status=405)

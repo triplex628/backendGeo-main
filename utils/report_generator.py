@@ -1,325 +1,415 @@
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
-
 from django.http import HttpResponse
-from api.models import TaskModel, ItemModel
-
-import os
-import datetime
-
-from django.utils import timezone
-
-class Detail:
-    def __init__(self, types_of_work, subtypes_of_work, category_of_item, subcategory_of_item, title, seria):
-        self.types_of_work = types_of_work
-        self.subtypes_of_work = subtypes_of_work
-        self.category_of_item = category_of_item
-        self.subcategory_of_item = subcategory_of_item
-        self.title = title
-        self.seria = seria
-
-    def __str__(self):
-        return f'{self.types_of_work}; {self.subtypes_of_work}; {self.category_of_item}; {self.subcategory_of_item}; ' \
-               f'{self.title}; {self.seria}'
+from api.models import TaskModel, EmployeeTaskModel, ItemModel, EmployeeModel
+from openpyxl.utils import get_column_letter
+import logging
+from datetime import timedelta
+from django.utils.timezone import now, localtime, is_naive, make_aware, get_current_timezone
 
 
-class EmployeeTaskInfo:
-    def __init__(self):
-        self.total_time = datetime.timedelta(milliseconds=0)
-        self.employees = []
-
+def format_seconds(seconds):
+    if seconds is None:
+        return "0:00:00"
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
 
 class ReportGenerator:
-    def __init__(self):
-        self.details = []
-        self.filtered_items = ItemModel.objects.all()
-
-    def get_required_verb(self, type_of_action: str) -> str:
-        match type_of_action:
-            case 'Производство':
-                return 'произведен'
-            case 'Тестирование':
-                return 'протестирован'
-            case 'Ремонт':
-                return 'отремонтирован'
-            case 'Отгрузка':
-                return 'выгружен'
-            case _:
-                return ''
-            
-    def get_required_verb_task(self, type_of_action: str) -> str:
-        match type_of_action:
-            case 'Производство':
-                return 'Произвести'
-            case 'Тестирование':
-                return 'Протестировать'
-            case 'Ремонт':
-                return 'Отремонтировать'
-            case 'Отгрузка':
-                return 'Выгрузить'
-            case _:
-                return ''
-
-    def upload_items(self):
-        excel_file = os.path.join('templates', 'Заполнение.xlsx')
-        wb = load_workbook(excel_file)
-
-        for sheetname in wb.sheetnames:
-            sheet = wb[sheetname]
-
-            data = []
-            for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=4):
-                row_data = []
-                for cell in row:
-                    cell_data = cell.value
-                    row_data.append(cell_data)
-                data.append(row_data)
-
-            cur_subtypes_of_item = None
-            cur_category_of_item = None
-            cur_subcategory_of_item = None
-            for row in data:
-                element_type = row[-1]
-                match element_type:
-                    case 'SUBTYPES_OF_WORK':
-                        cur_subtypes_of_item = row[0].strip()
-                        cur_category_of_item = None
-                        cur_subcategory_of_item = None
-                    case 'CATEGORY_OF_ITEM':
-                        cur_category_of_item = row[1].strip()
-                        cur_subcategory_of_item = None
-                    case 'SUBCATEGORY_OF_ITEM':
-                        cur_subcategory_of_item = row[1].strip()
-                    case None:
-                        self.details.append(
-                            Detail(
-                                sheetname, 
-                                cur_subtypes_of_item, 
-                                cur_category_of_item, 
-                                cur_subcategory_of_item, 
-                                row[1], 
-                                row[2]
-                            )
-                        )
-
-    def generate_filtered_items(self):
-        for detail in self.details:
-            item = ItemModel.objects.filter(
-                types_of_work=detail.types_of_work, 
-                subtypes_of_work=detail.subtypes_of_work,
-                category_of_item=detail.category_of_item,
-                subcategory_of_item=detail.subcategory_of_item,
-                title=detail.title,
-                seria = detail.seria,
-
-            ).first()
-
-            filtered_tasks = TaskModel.objects.filter(item=item)
-            if filtered_tasks:
-                self.filtered_items.append(item)
-
-#  generate first sheet
-    def generate_first_sheet(self, sheet, employee_tasks):
-        sheet['B1'] = "Задача"
-        sheet['C1'] = "Результат"
-        sheet['D1'] = "Потраченное время"
-        sheet['E1'] = "Дата"
-        sheet['F1'] = "Сотрудник"
-        sheet['G1'] = "ID администартора"
-        sheet['H1'] = "ID прибора"
 
 
-        for index in range(6):
-            column_letter = chr(ord('A') + index)
-            sheet.column_dimensions[column_letter].auto_size = True
+    def generate_task_sheet(self, sheet, employee_tasks, end_time):
+        """
+        Генерация листа 'Отчет по задачам'
+        """
+        sheet.title = "Отчет по задачам"
+        column_widths = [5, 30, 20, 20, 15, 20, 20, 30, 15]
+        for col_num, width in enumerate(column_widths, start=1):
+            sheet.column_dimensions[get_column_letter(col_num)].width = width
 
-        tasks = {}
-        for employee_task in employee_tasks:
-            if not (employee_task.task.id in tasks):
-                tasks[employee_task.task.id] = []
-            tasks[employee_task.task.id].append(employee_task)
+        headers = ["№", "Задача", "Дата постановки", "Дата завершения", "ID задачи", 
+                    "Потраченное время", "Переделка", "Сотрудники", "Статус"]
 
-        row_index = 2
-        for task_id, values in tasks.items():
-            task = TaskModel.objects.get(id=task_id)
-
-            total_time = datetime.timedelta(milliseconds=0)
-            min_date = timezone.datetime.now()
-            admin_id = None
-            item_id = None
-
-
-            for employee_task in values:
-              
-
-                total_time += employee_task.total_time
-                end_time_naive = employee_task.end_time.replace(tzinfo=None)  # Convert to naive
-                min_date = end_time_naive
-                admin_id = employee_task.admin.id
-                item_id = employee_task.item.id
-                employee = f"{employee_task.employee.name}  {employee_task.employee.surname}"
-
-
-
-
-            sheet[f'A{row_index}'] = row_index - 1
-            sheet[f'B{row_index}'] = f'{self.get_required_verb_task(task.get_type_of_task_display())} {task.item.title}'
-            sheet[f'C{row_index}'] = f'{task.item.title} {self.get_required_verb(task.get_type_of_task_display())}' 
-            sheet[f'D{row_index}'] = total_time
-            sheet[f'E{row_index}'] = end_time_naive.strftime('%d.%m.%Y')
-            sheet[f'F{row_index}'] = employee
-            sheet[f'G{row_index}'] = admin_id
-            sheet[f'H{row_index}'] = task.manual_item_id
-            row_index += 1
-
-#   generate second sheet
-    def generate_second_sheet(self, sheet, employee_tasks):
-        sheet['B1'] = 'Изделие'
-        sheet['C1'] = 'Тип работы'
-        sheet['D1'] = 'Продолжительность'
-
-        row_index = 2
-        for index in range(4):
-            column_letter = chr(ord('A') + index)
-            sheet.column_dimensions[column_letter].auto_size = True
         
+        
+        for col_num, header in enumerate(headers, start=1):
+            sheet.cell(row=1, column=col_num).value = header
+            sheet.cell(row=1, column=col_num).font = Font(bold=True)
+            sheet.cell(row=1, column=col_num).alignment = Alignment(horizontal="center", vertical="center")
+
+        # Стартовая строка
+        row = 2
+
+        for task_index, task in enumerate(employee_tasks, start=1):
+            
+            task_title = task.task.title if task.task else "Не указано"
+            start_time = task.start_time.strftime("%d.%m.%Y") if task.start_time else ""
+            end_time = task.end_time.strftime("%d.%m.%Y") if task.end_time else "не завершена"
+            total_time = format_seconds(task.total_time) if task.total_time else "0:00:00"
+            rework_time = format_seconds(task.rework_time) if task.rework_time else "0:00:00"
+
+            
+            employees = []
+            statuses = []
+
+            for employee_task in EmployeeTaskModel.objects.filter(task=task.task):
+                employee_name = f"{employee_task.employee.name} {employee_task.employee.surname}"
+                employees.append(employee_name)
+
+                # Определяем статус
+                if employee_task.paused_message == "Ожидание по браку":
+                    statuses.append("Закончено по браку")
+                elif employee_task.paused_message == "Ожидание по комплектующим":
+                    statuses.append("Закончена по недостатку комплектующих")
+                elif employee_task.end_time:
+                    statuses.append("Работа завершена")
+                else:
+                    statuses.append("В работе")
+
+           
+            sheet.cell(row=row, column=1).value = task_index  # №
+            sheet.cell(row=row, column=2).value = task_title  # Задача
+            sheet.cell(row=row, column=3).value = start_time  # Дата постановки
+            sheet.cell(row=row, column=4).value = end_time  # Дата завершения
+            sheet.cell(row=row, column=5).value = task.task.id if task.task else "N/A"  # ID задачи
+            sheet.cell(row=row, column=6).value = total_time  # Потраченное время
+            sheet.cell(row=row, column=7).value = rework_time  # Переделка
+            sheet.cell(row=row, column=8).value = "\n".join(employees)  # Сотрудники
+            sheet.cell(row=row, column=8).alignment = Alignment(wrap_text=True, vertical="top")
+            sheet.cell(row=row, column=9).value = "\n".join(statuses)  # Статус
+            sheet.cell(row=row, column=9).alignment = Alignment(wrap_text=True, vertical="top")
+
+            row += 1
+
+
+
+
+
+    def generate_equipment_sheet(self, sheet, start_time, end_time):
+        """
+        Генерация отчета 'По приборам' 
+        """
+        sheet.title = "По приборам"
+
+        
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+        
+        column_widths = [5, 15, 20, 20, 20, 30, 30, 25, 30]
+        for col_num, width in enumerate(column_widths, start=1):
+            sheet.column_dimensions[get_column_letter(col_num)].width = width
+
+       
+        headers = ["№", "ID прибора", "Дата начала работы", "Дата окончания работы", "Тип работы",
+                "Продолжительность работы (общая)", "Переделка (кол-во времени)", "Сотрудник", "Комментарий"]
+
+        try:
+            
+            employee_tasks = EmployeeTaskModel.objects.filter(
+                start_time__gte=start_time,
+                end_time__lte=end_time
+            )
+            logging.debug(f"Фильтрация задач успешна. Найдено {len(employee_tasks)} задач.")
+        except Exception as e:
+            logging.error(f"Ошибка при фильтрации задач: {e}")
+            sheet.append(["Ошибка при фильтрации задач", str(e)])
+            return
+
+        
+        tasks_by_item = {}
         for employee_task in employee_tasks:
-            task = employee_task.task
-            sheet[f'A{row_index}'] = row_index - 1
-            sheet[f'B{row_index}'] = task.title
-            sheet[f'C{row_index}'] = task.get_type_of_task_display()
-            sheet[f'D{row_index}'] = employee_task.total_time 
-            row_index += 1
+            item_title = employee_task.item.title if employee_task.item else "Не указан"
+            if item_title not in tasks_by_item:
+                tasks_by_item[item_title] = []
+            tasks_by_item[item_title].append(employee_task)
+
+        # Стартовая строка
+        row = 1
+
+        for item_title, tasks in tasks_by_item.items():
+            try:
+                
+                sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
+                sheet.cell(row=row, column=1).value = f"Прибор: {item_title}"
+                sheet.cell(row=row, column=1).alignment = Alignment(horizontal="center", vertical="center")
+                sheet.cell(row=row, column=1).font = Font(bold=True, size=14)
+                row += 1
+
+                
+                for col_num, header in enumerate(headers, start=1):
+                    sheet.cell(row=row, column=col_num).value = header
+                    sheet.cell(row=row, column=col_num).font = Font(bold=True)
+                    sheet.cell(row=row, column=col_num).alignment = Alignment(horizontal="center", vertical="center")
+                row += 1
+
+                
+                total_duration_seconds = sum(
+                    [et.total_time if et.total_time else 0 for et in tasks],  
+                    0
+                )
+                total_duration_hours = total_duration_seconds / 3600  # Преобразуем в часы
+                logging.debug(f"Общая продолжительность для '{item_title}': {total_duration_hours:.2f} ч.")
 
 
-    def generate_third_sheet(self, sheet, employee_tasks):
-        for index in range(8):
-            column_letter = chr(ord('A') + index)
-            sheet.column_dimensions[column_letter].auto_size = True
+                
+                for task_index, employee_task in enumerate(tasks, start=1):
+                    task = employee_task.task
+                    item = employee_task.item
+                    paused_message = employee_task.paused_message
+                    is_finished = task.is_available
 
-        sheet.merge_cells('E1:I1')
-        sheet['E1'] = 'Тип работ'
-        sheet['E1'].alignment = Alignment(horizontal='center', vertical='center')
-        sheet['E1'].font = Font(size=14, bold=True)
+                    # Определяем комментарий
+                    if paused_message == "Ожидание по браку":
+                        comment = "Закончено по браку"
+                    elif paused_message == "Ожидание по комплектующим":
+                        comment = "Закончена по недостатку комплектующих"
+                    elif end_time:
+                        comment = "Работа завершена"
+                    else:
+                        comment = "В работе"
 
-        types_of_task = ['Производство', 'Ремонт', 'Тестирование', 'Отгрузка', 'Итого']
-        for i in range(len(types_of_task)):
-            sheet[f'{chr(ord("E") + i)}2'] = types_of_task[i]
+                    # Вычисляем безопасное время окончания задачи
+                    end_times = [et.end_time for et in tasks if et.end_time]
+                    end_time_task = max(end_times) if end_times else None
 
-        cur_types_of_work = None
-        cur_subtypes_of_work = None
-        cur_category_of_item = None
-        cur_subcategory_of_item = None
+                    # Заполняем строку данными
+                    sheet.cell(row=row, column=1).value = task_index  # Порядковый номер
+                    sheet.cell(row=row, column=2).value = item.id if item else "Не указан"  # ID прибора
+                    sheet.cell(row=row, column=3).value = employee_task.start_time.strftime("%d.%m.%Y") if employee_task.start_time else ""
+                    sheet.cell(row=row, column=4).value = end_time_task.strftime("%d.%m.%Y") if end_time_task else "не завершена"
+                    sheet.cell(row=row, column=5).value = task.get_type_of_task_display() if hasattr(task, 'get_type_of_task_display') else task.type_of_task  # Тип работы
+                    sheet.cell(row=row, column=6).value = format_seconds(employee_task.total_time) if employee_task.total_time else "0:00:00" # Общая продолжительность
+                    sheet.cell(row=row, column=7).value = format_seconds(employee_task.rework_time) if employee_task.rework_time else "0:00:00" # Время на переделку
+                    sheet.cell(row=row, column=8).value = f"{employee_task.employee.name} {employee_task.employee.surname}"  # Сотрудник
+                    sheet.cell(row=row, column=9).value = comment  # Комментарий
+                    row += 1
 
-        row_index = 1
+                # отступ
+                row += 5
 
-        for detail in self.filtered_items:
-            flag = False
-            item = ItemModel.objects.filter(
-                types_of_work=detail.types_of_work,
-                subtypes_of_work=detail.subtypes_of_work,
-                category_of_item=detail.category_of_item,
-                subcategory_of_item=detail.subcategory_of_item,
-                title=detail.title,
-                seria=detail.seria,
-            ).first()
+                
+                sheet.cell(row=row, column=1).value = "ИТОГ:"
+                sheet.cell(row=row, column=1).font = Font(bold=True)
+                sheet.cell(row=row, column=6).value = f"{total_duration_hours:.2f} ч"
+                sheet.cell(row=row, column=6).font = Font(bold=True)
+                row += 1
 
-            filtered_tasks = TaskModel.objects.filter(item=item)
+            except Exception as e:
+                logging.error(f"Ошибка при обработке прибора '{item_title}': {e}")
+                sheet.append([f"Ошибка при обработке прибора '{item_title}'", str(e)])
+                continue
 
-            for filtered_task in filtered_tasks:
-                filtered_employee_tasks = employee_tasks.filter(task=filtered_task)
 
-                if not filtered_employee_tasks:
-                    flag = True
-                    break
 
-                if item.subtypes_of_work != cur_subtypes_of_work:
-                    cur_subtypes_of_work = item.subtypes_of_work
-                    cur_category_of_item = None
-                    cur_subcategory_of_item = None
 
-                    cell_index = f'A{row_index}'
-                    sheet.merge_cells(f'{cell_index}:D{row_index}')
-                    sheet[cell_index].alignment = Alignment(horizontal='center', vertical='center')
-                    sheet[cell_index].font = Font(size=11, bold=True)
-                    sheet[cell_index] = cur_subtypes_of_work
-                    row_index += 1
 
-                if item.category_of_item != cur_category_of_item:
-                    cur_category_of_item = item.category_of_item
-                    cur_subcategory_of_item = None
 
-                    cell_index = f'B{row_index}'
-                    sheet.merge_cells(f'{cell_index}:D{row_index}')
-                    sheet[cell_index].alignment = Alignment(horizontal='center', vertical='center')
-                    sheet[cell_index].font = Font(size=11, bold=True)
-                    sheet[cell_index] = cur_category_of_item
-                    row_index += 1
 
-                if item.subcategory_of_item != cur_subcategory_of_item:
-                    cur_subcategory_of_item = item.subcategory_of_item
+    def generate_employee_sheet(self, sheet, start_time, end_time):
+        """
+        Генерация третьего листа отчета с группировкой задач по сотрудникам.
+        """
+        sheet.title = "По сотрудникам"
 
-                    cell_index = f'B{row_index}'
-                    sheet.merge_cells(f'{cell_index}:D{row_index}')
-                    sheet[cell_index].alignment = Alignment(horizontal='center', vertical='center')
-                    sheet[cell_index].font = Font(size=11, bold=True)
-                    sheet[cell_index] = cur_subcategory_of_item
-                    row_index += 1
+        
+        column_widths = [5, 15, 30, 20, 20, 20, 15, 20, 20]
+        for col_num, width in enumerate(column_widths, start=1):
+            sheet.column_dimensions[get_column_letter(col_num)].width = width
 
-                sheet[f'C{row_index}'].alignment = Alignment(horizontal='center', vertical='center')
-                sheet[f'C{row_index}'].font = Font(size=11, bold=True)
-                sheet[f'C{row_index}'] = item.title
+        
+        headers = ["№", "ID Задачи", "Задача", "Дата взятия", "Дата окончания",
+                "Потраченное время", "Переделка", "Статус работы"]
+        
+        
+        row = 1
 
-                sheet[f'D{row_index}'].alignment = Alignment(horizontal='center', vertical='center')
-                sheet[f'D{row_index}'].font = Font(size=11, bold=True)
-                sheet[f'D{row_index}'] = item.seria
+        
+        employees = EmployeeModel.objects.all()
 
-                employee_tasks_info = {
-                    'Производство': EmployeeTaskInfo(),
-                    'Ремонт': EmployeeTaskInfo(),
-                    'Тестирование': EmployeeTaskInfo(),
-                    'Отгрузка': EmployeeTaskInfo(),
-                    'Прочее': EmployeeTaskInfo()
-                }
+        for employee in employees:
+            
+            sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+            sheet.cell(row=row, column=1).value = f"{employee.name} {employee.surname}"
+            sheet.cell(row=row, column=1).font = Font(bold=True, size=14)
+            sheet.cell(row=row, column=1).alignment = Alignment(horizontal="center", vertical="center")
+            row += 1
 
-                for filtered_employee_task in filtered_employee_tasks:
-                    employee_tasks_info[
-                        filtered_task.get_type_of_task_display()].total_time += filtered_employee_task.total_time
-                    employee_tasks_info[filtered_task.get_type_of_task_display()].employees.append(
-                        f'{filtered_employee_task.employee}')
+            
+            for col_num, header in enumerate(headers, start=1):
+                sheet.cell(row=row, column=col_num).value = header
+                sheet.cell(row=row, column=col_num).font = Font(bold=True)
+                sheet.cell(row=row, column=col_num).alignment = Alignment(horizontal="center", vertical="center")
+            row += 1
 
-                col_index = 0
-                total_time = datetime.timedelta(milliseconds=0)
-                for key, value in employee_tasks_info.items():
-                    sheet[f'{chr(ord("E") + col_index)}{row_index}'] = value.total_time
-                    total_time += value.total_time
-                    sheet[f'{chr(ord("E") + col_index)}{row_index + 1}'] = '\n'.join(value.employees)
-                    col_index += 1
-                if not flag:
-                    sheet[f'{chr(ord("E") + 4)}{row_index}'] = total_time
-                    row_index += 2
+            
+            employee_tasks = EmployeeTaskModel.objects.filter(
+                employee=employee, start_time__gte=start_time, end_time__lte=end_time
+            )
 
-    def generate_report(self, employee_tasks):
+            if employee_tasks.exists():
+                for task_index, task in enumerate(employee_tasks, start=1):
+                    
+                    sheet.cell(row=row, column=1).value = task_index  # №
+                    sheet.cell(row=row, column=2).value = task.task.id if task.task else "N/A"  # ID Задачи
+                    sheet.cell(row=row, column=3).value = task.task.title if task.task else "N/A"  # Задача
+                    sheet.cell(row=row, column=4).value = task.start_time.strftime("%d.%m.%Y") if task.start_time else "N/A"  # Дата взятия
+                    sheet.cell(row=row, column=5).value = task.end_time.strftime("%d.%m.%Y") if task.end_time else "N/A"  # Дата окончания
+                    sheet.cell(row=row, column=6).value = format_seconds(task.total_time) if task.total_time else "0:00:00"  # Потраченное время
+                    sheet.cell(row=row, column=7).value = format_seconds(task.rework_time) if task.rework_time else "0:00:00"  # Переделка
+                    sheet.cell(row=row, column=8).value = self.get_task_status(task)  # Статус работы
+                    row += 1
+            else:
+                
+                sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+                sheet.cell(row=row, column=1).value = "Нет задач"
+                sheet.cell(row=row, column=1).alignment = Alignment(horizontal="center", vertical="center")
+                row += 1
+
+            
+            row += 1
+
+    def get_task_status(self, task):
+        """
+        Получение статуса работы.
+        """
+        if task.paused_message == "Ожидание по браку":
+            return "Закончена по браку"
+        elif task.paused_message == "Ожидание по комплектующим":
+            return "Закончена по недостатку комплектующих"
+        elif task.end_time:
+            return "Работа завершена"
+        else:
+            return "В работе"
+
+
+
+
+
+
+    def generate_report(self, start_time, end_time):
+        print(f"Генерация отчета с {start_time} по {end_time}")
         workbook = Workbook()
 
-        self.generate_filtered_items()
+        # Генерация первого листа
         sheet1 = workbook.active
-        sheet1.title = "Лист 1"
-        self.generate_first_sheet(sheet1, employee_tasks)
+        self.generate_task_sheet(sheet1, EmployeeTaskModel.objects.filter(start_time__gte=start_time, end_time__lte=end_time), end_time)
 
-        sheet2 = workbook.create_sheet(title="Лист 2")
-        workbook.active = sheet2
-        self.generate_second_sheet(sheet2, employee_tasks)
 
-        sheet3 = workbook.create_sheet(title="Лист 3")
-        workbook.active = sheet3
-        self.generate_third_sheet(sheet3, employee_tasks)
+        # Генерация второго листа
+        sheet2 = workbook.create_sheet("По приборам")
+        try:
+            self.generate_equipment_sheet(sheet2, start_time, end_time)
+        except Exception as e:
+            print(f"Ошибка в generate_equipment_sheet: {e}")
 
-        workbook.active = sheet1
+        # Генерация третьего листа
+        sheet3 = workbook.create_sheet("По сотрудникам")
+        self.generate_employee_sheet(sheet3, start_time, end_time)
 
+        # Сохранение отчета
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-        response['Content-Disposition'] = 'attachment; filename=example.xlsx'
-        workbook.save(response) 
-        # workbook.save('Мой_файл.xlsx')       
+        response['Content-Disposition'] = 'attachment; filename=full_report.xlsx'
+        workbook.save(response)
         return response
+
+    
+
+
+def generate_single_report(employee_tasks):
+    """
+    Генерация отчета на 1 листе.
+    """
+
+    wb = Workbook()
+    sheet = wb.active
+    sheet.title = "Отчет по задачам"
+
+    
+    headers = [
+        "№",
+        "Сотрудник",
+        "Задача",
+        "ID задачи",
+        "Дата постановки",
+        "Дата запуска",
+        "Дата завершения",
+        "Полезное время",
+        "Переделка",
+        "Внерабочее время",
+        "Общее время",
+    ]
+    sheet.append(headers)
+
+    
+    for col in sheet.iter_cols(min_row=1, max_row=1, min_col=1, max_col=len(headers)):
+        for cell in col:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # Текущая временная зона
+    current_tz = get_current_timezone()
+    current_time = now()  # Текущее время (осведомленное)
+   
+    for idx, employee_task in enumerate(employee_tasks, start=1):
+        task = employee_task.task
+        
+        # Приведение start_time и end_time к осведомленному времени (если они наивные)
+        start_time = employee_task.start_time
+        if is_naive(start_time):
+            start_time = make_aware(start_time, timezone=current_tz)
+
+        end_time = employee_task.end_time
+        if end_time and is_naive(end_time):
+            end_time = make_aware(end_time, timezone=current_tz)
+
+        created_at = task.created_at
+        if is_naive(created_at):
+            created_at = make_aware(created_at, timezone=current_tz)
+        
+        finished_at = task.finished_at
+        if finished_at and is_naive(finished_at):
+            finished_at = make_aware(finished_at, timezone=current_tz)
+            
+
+        if finished_at:
+            total_seconds = employee_task.total_time  
+        else:  
+            total_seconds = int((current_time - localtime(task.created_at)).total_seconds())
+
+        row = [
+            idx,  # №
+            f"{employee_task.employee.name} {employee_task.employee.surname}" if employee_task.employee else "Не указан",  # Сотрудник
+            task.title if task else "Не указано",  # Задача
+            task.id if task else "N/A",  # ID задачи
+            task.created_at.strftime("%d.%m.%Y %H:%M:%S") if task and task.created_at else "Не указано",  # Дата постановки
+            employee_task.start_time.strftime("%d.%m.%Y %H:%M:%S") if employee_task.start_time else "Не запущено",  # Дата запуска
+            task.finished_at.strftime("%d.%m.%Y %H:%M:%S") if task.finished_at else "не завершена",  # Дата завершения
+            format_seconds(employee_task.useful_time) if employee_task.useful_time else "0:00:00",  # Полезное время
+            format_seconds(employee_task.rework_time) if employee_task.rework_time else "0:00:00",  # Переделка
+            format_seconds(employee_task.non_working_time) if employee_task.non_working_time else "0:00:00",  # Внерабочее время
+            format_seconds(employee_task.total_time) if employee_task.total_time else format_seconds(total_seconds),  # Общее время
+        ]
+        sheet.append(row)
+    # Автоматическая подгонка ширины столбцов
+    for col_num, column_cells in enumerate(sheet.columns, start=1):
+        max_length = 0
+        column_letter = get_column_letter(col_num)
+        for cell in column_cells:
+            try:
+                if cell.value:  #
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        adjusted_width = max_length + 2  # немного пространства
+        sheet.column_dimensions[column_letter].width = adjusted_width
+
+    # Выравниваем текст в ячейках
+    # for col in sheet.iter_cols(min_row=2, max_row=sheet.max_row, min_col=1, max_col=len(headers)):
+    #     for cell in col:
+    #         cell.alignment = Alignment(horizontal="left", vertical="top")
+
+    # Генерация файла
+    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response['Content-Disposition'] = 'attachment; filename="task_report.xlsx"'
+    wb.save(response)
+    return response
