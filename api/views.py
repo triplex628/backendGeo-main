@@ -543,7 +543,7 @@ def create_employee_task(request):
         paused_message="Не начал",
         is_started=False,
         is_finished=False,
-        total_time=datetime.timedelta(milliseconds=0), # Обнуляем время
+        total_time=0, 
         start_time=None,
         end_time=None
     )
@@ -645,7 +645,7 @@ def check_shift(request):
                     employee_task.last_non_working_start = now()  # Записываем текущее время как начало
                 employee_task.save()
                 return Response(
-                    {"message": "Время вызова записано в last_non_working_start."},
+                    {"message": "Продолжение работы вне рабочей смены успешно записано."},
                     status=200
                 )
         else:
@@ -860,7 +860,7 @@ def start_useful_time(request):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
-            task_id = data.get('task_id')
+            task_id = data.get('employee_task_id')
 
             if not task_id:
                 return JsonResponse({"error": "task_id is required"}, status=400)
