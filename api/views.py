@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from django.utils.timezone import now
 from . import models
 from . import serializers
-
+from django.db import transaction
 from utils.report_generator import ReportGenerator, generate_single_report
 from .models import AdminModel, EmployeeTaskModel, ItemModel, EmployeeModel, TaskModel
 from traceback import format_exc
@@ -711,6 +711,7 @@ def stop_non_working_time(request):
         return Response({"error": str(e)}, status=500)
 
 
+
 @api_view(['POST'])
 def end_task(request):
     if request.method == 'POST':
@@ -718,34 +719,53 @@ def end_task(request):
             data = json.loads(request.body)
             task_id = data.get('task_id')
 
-            
             if not task_id:
                 return JsonResponse({"error": "task_id is required"}, status=400)
 
-            
-            task = TaskModel.objects.filter(id=task_id).first()
-            if not task:
-                return JsonResponse({"error": "Task not found"}, status=404)
+            #task = EmployeeTaskModel.objects.filter(id=task_id).first()
+            # if not task:
+            #     return JsonResponse({"error": "Task not found"}, status=404)
 
-            
-            if not task.created_at or not task.finished_at:
-                return JsonResponse({"error": "Task does not have valid timestamps"}, status=400)
-
-            
-            time_difference = task.finished_at - task.created_at
-
-            
-            employee_task = EmployeeTaskModel.objects.filter(task=task).first()
+            employee_task = EmployeeTaskModel.objects.filter(id=task_id).first()
             if not employee_task:
                 return JsonResponse({"error": "EmployeeTaskModel not found for the given task"}, status=404)
 
-            
-            total_seconds = time_difference.total_seconds()
-            total_time = timedelta(seconds=total_seconds)
-            employee_task.total_time = total_time
-            employee_task.save()
+            # Фиксируем текущее время как завершение всех таймеров
+            end_time = now()
 
-            return JsonResponse({"message": "Task time updated successfully"}, status=200)
+            # Остановка полезного времени
+            if employee_task.last_start_time:
+                useful_time_delta = (end_time - employee_task.last_start_time).total_seconds()
+                employee_task.useful_time += int(useful_time_delta)
+                employee_task.last_end_time = end_time
+
+            # Остановка переделки
+            if employee_task.last_rework_start and not employee_task.last_rework_end:
+                rework_time_delta = (end_time - employee_task.last_rework_start).total_seconds()
+                employee_task.rework_time += int(rework_time_delta)
+                employee_task.last_rework_end = end_time
+
+            # Остановка внерабочего времени
+            if employee_task.last_non_working_start and not employee_task.last_non_working_end:
+                non_working_time_delta = (end_time - employee_task.last_non_working_start).total_seconds()
+                employee_task.non_working_time += int(non_working_time_delta)
+                employee_task.last_non_working_end = end_time
+
+            # Фиксируем общее время задачи
+            # if task.created_at and not task.finished_at:
+            #     task.finished_at = end_time
+            #     time_difference = task.finished_at - task.created_at
+            #     employee_task.total_time = int(time_difference.total_seconds())
+            employee = EmployeeModel.objects.filter(id=employee_task.employee_id).first()
+            employee_task.is_started = False
+            employee_task.is_finished = True
+            employee.status =False
+            with transaction.atomic():  # Гарантируем целостность данных
+                #task.save()
+                employee.save()
+                employee_task.save()
+
+            return JsonResponse({"message": "Task and all timers stopped successfully"}, status=200)
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
@@ -854,12 +874,12 @@ def start_useful_time(request):
                 return JsonResponse({"error": "Task cannot be started as it is finished"}, status=400)
 
             # Запуск таймера
-            if not employee_task.is_started:
-                employee_task.is_started = True
-                employee_task.is_pauseed = False
-                employee_task.last_start_time = timezone.now()  
-                #employee_task.start_time = timezone.now()
-                employee_task.save()
+            #if not employee_task.is_started:
+            employee_task.is_started = True
+            employee_task.is_pauseed = False
+            employee_task.last_start_time = timezone.now()  
+            #employee_task.start_time = timezone.now()
+            employee_task.save()
 
             return JsonResponse({"message": "Useful time started successfully"}, status=200)
 
