@@ -15,7 +15,7 @@ from django.utils.timezone import now
 from . import models
 from . import serializers
 from django.db import transaction
-from utils.report_generator import ReportGenerator, generate_single_report
+from utils.report_generator import ReportGenerator, generate_her_report
 from .models import AdminModel, EmployeeTaskModel, ItemModel, EmployeeModel, TaskModel
 from traceback import format_exc
 from django.views.decorators.csrf import csrf_exempt
@@ -507,7 +507,7 @@ def generate_single_report(request):
         return Response({"error": "No tasks found for the given date range."}, status=404)
 
     # Генерация отчета и возврат HTTP-ответа
-    return generate_zalup_report(employee_tasks)
+    return generate_her_report(employee_tasks)
 
 @api_view(['POST'])
 def create_employee_task(request):
@@ -794,14 +794,17 @@ def start_rework(request):
             # Установка времени начала переделки
             current_time = timezone.now()
             employee_task.last_rework_start = current_time
-            if not employee_task.is_paused:
+            if not employee_task.is_paused and not employee_task.is_finished and employee_task.is_started:
                 time_difference = current_time - employee_task.last_start_time
                 time_difference_seconds = int(time_difference.total_seconds())
                 employee_task.useful_time += time_difference_seconds
                 employee_task.last_start_time = None
+                return JsonResponse({"message": "Rework started successfully"}, status=200)
+            else:
+                return JsonResponse({"error": "Задача уже завершена или еще не начата"}, status=404)
             employee_task.save()
 
-            return JsonResponse({"message": "Rework started successfully"}, status=200)
+            
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
@@ -841,7 +844,7 @@ def end_rework(request):
 
             # Обновление общего времени переделки
             employee_task.rework_time += time_difference_seconds
-            employee_task.last_rework_start = None  # Сбрасываем время начала
+            #employee_task.last_rework_start = None  # Сбрасываем время начала
             employee_task.last_rework_end = None  # Сбрасываем время окончания
             employee_task.save()
 
@@ -929,3 +932,36 @@ def stop_useful_time(request):
             return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse({"error": "Invalid request method"}, status=405)
+
+
+@api_view(['GET'])
+def get_rework_timer(request):
+    task_id = request.query_params.get('task_id')
+
+    if not task_id:
+        return JsonResponse({"error": "task_id is required"}, status=400)
+
+    # task = TaskModel.objects.filter(id=task_id).first()
+    # if not task:
+    #     return JsonResponse({"error": "Task not found"}, status=404)
+
+    employee_task = EmployeeTaskModel.objects.filter(id=task_id).first()
+    if not employee_task:
+        return JsonResponse({"error": "EmployeeTaskModel not found for the given task"}, status=404)
+
+    # Получаем общее время переделки
+    total_rework_time = employee_task.rework_time
+
+    # Проверяем, идет ли переделка прямо сейчас
+    is_rework_active = employee_task.last_rework_start is not None
+
+    # Если переделка активна, считаем текущее время переделки
+    if is_rework_active:
+        current_rework_time = total_rework_time + int((now() - employee_task.last_rework_start).total_seconds())
+    else:
+        current_rework_time = total_rework_time
+
+    return JsonResponse({
+        "task_id": task_id,
+        "rework_time": current_rework_time,  # В секундах
+    }, status=200)

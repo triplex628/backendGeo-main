@@ -315,7 +315,7 @@ class ReportGenerator:
     
 
 
-def generate_single_report(employee_tasks):
+def generate_her_report(employee_tasks):
     """
     Генерация отчета на 1 листе.
     """
@@ -374,7 +374,7 @@ def generate_single_report(employee_tasks):
         if finished_at:
             total_seconds = employee_task.total_time  
         else:  
-            total_seconds = int((current_time - localtime(task.created_at)).total_seconds())
+            total_seconds = int((current_time - task.created_at).total_seconds())
 
         row = [
             idx,  # №
