@@ -22,6 +22,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             task_info = {
                 'task_id': employee_task.task.id,
                 'task': task_serializer.data,
+                'employee_task_id': employee_task.id,
             }
             return task_info
         else:
