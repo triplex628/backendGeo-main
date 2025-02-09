@@ -799,6 +799,7 @@ def start_rework(request):
                 time_difference_seconds = int(time_difference.total_seconds())
                 employee_task.useful_time += time_difference_seconds
                 employee_task.last_start_time = None
+                employee_task.save()
                 return JsonResponse({"message": "Rework started successfully"}, status=200)
             else:
                 return JsonResponse({"error": "Задача уже завершена или еще не начата"}, status=404)
