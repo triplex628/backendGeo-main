@@ -5,7 +5,7 @@ from . import models
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.TaskModel
-        fields = '__all__'
+        fields = 'all'
 
 
 class EmployeeSerializer(serializers.ModelSerializer):
@@ -13,7 +13,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.EmployeeModel
-        fields = '__all__'
+        fields = 'all'
 
     def get_task_info(self, obj):
         employee_task = models.EmployeeTaskModel.objects.filter(employee=obj, is_finished=False).first()
@@ -22,7 +22,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             task_info = {
                 'task_id': employee_task.task.id,
                 'task': task_serializer.data,
-                'employee_task_id': employee_task.id,
+                'employee_task_id': employee_task.id
             }
             return task_info
         else:
@@ -36,18 +36,18 @@ class EmployeeSerializer(serializers.ModelSerializer):
 class AdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.AdminModel
-        fields = '__all__'
+        fields = 'all'
 
 
 class PlotSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.PlotModel
-        fields = '__all__'
+        fields = 'all'
 
 class ItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.ItemModel
-        fields = '__all__'
+        fields = 'all'
 
 
 class EmployeeTaskSerializer(serializers.ModelSerializer):
@@ -58,30 +58,30 @@ class EmployeeTaskSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.EmployeeTaskModel
-        fields = '__all__'
+        fields = 'all'
 
     def get_admin_name(self,obj):
         return f"{obj.admin.name} {obj.admin.surname} "
-    
+
     def get_employee_name(self, obj):
         return f"{obj.employee.surname} {obj.employee.name}"
 
     def get_task_title(self, obj):
         return f"{obj.task.title}"
-    
+
     def get_total_time(self, obj):
-        
+
         if isinstance(obj.total_time, int):
             return obj.total_time
-        
-        elif isinstance(obj.total_time, timedelta):
-            return int(obj.total_time.total_seconds())
-       
-        return 0  
+
+#         elif isinstance(obj.total_time, timedelta):
+#             return int(obj.total_time.total_seconds())
+#
+        return 0
 
 
 
 class TrackingTaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.TrackingTaskModel
-        fields = '__all__'
+        fields = 'all'
