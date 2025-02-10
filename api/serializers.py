@@ -5,7 +5,7 @@ from . import models
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.TaskModel
-        fields = 'all'
+        fields = '__all__'
 
 
 class EmployeeSerializer(serializers.ModelSerializer):
@@ -13,7 +13,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.EmployeeModel
-        fields = 'all'
+        fields = '__all__'
 
     def get_task_info(self, obj):
         employee_task = models.EmployeeTaskModel.objects.filter(employee=obj, is_finished=False).first()
@@ -36,18 +36,18 @@ class EmployeeSerializer(serializers.ModelSerializer):
 class AdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.AdminModel
-        fields = 'all'
+        fields = '__all__'
 
 
 class PlotSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.PlotModel
-        fields = 'all'
+        fields = '__all__'
 
 class ItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.ItemModel
-        fields = 'all'
+        fields = '__all__'
 
 
 class EmployeeTaskSerializer(serializers.ModelSerializer):
@@ -58,7 +58,7 @@ class EmployeeTaskSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.EmployeeTaskModel
-        fields = 'all'
+        fields = '__all__'
 
     def get_admin_name(self,obj):
         return f"{obj.admin.name} {obj.admin.surname} "
@@ -84,4 +84,4 @@ class EmployeeTaskSerializer(serializers.ModelSerializer):
 class TrackingTaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.TrackingTaskModel
-        fields = 'all'
+        fields = '__all__'
