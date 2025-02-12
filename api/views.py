@@ -19,8 +19,8 @@ from utils.report_generator import ReportGenerator, generate_her_report
 from .models import AdminModel, EmployeeTaskModel, ItemModel, EmployeeModel, TaskModel
 from traceback import format_exc
 from django.views.decorators.csrf import csrf_exempt
-
-
+from threading import Timer
+from django.utils.timezone import make_aware, is_aware, is_naive, get_current_timezone
 
 
 class EmployeeView(ListCreateAPIView, RetrieveUpdateDestroyAPIView):
@@ -132,6 +132,7 @@ class TaskView(RetrieveUpdateDestroyAPIView, ListCreateAPIView):
             }, status=status.HTTP_409_CONFLICT)
 
         instance.is_available = False
+        instance.admin_finished_at = now()
         instance.save()
 
         return Response({"message": "Task marked as not available"}, status=status.HTTP_200_OK)
@@ -302,6 +303,10 @@ class TaskHandlerView(APIView):
 
                 employee_task.end_time = end_time
                 employee_task.total_time += int((tracking_task.end_time - tracking_task.start_time).total_seconds())
+
+                employee_task.task = None
+                employee_task.save()
+
                 employee.status =False
 
                 employee.save()
@@ -847,6 +852,7 @@ def end_rework(request):
             employee_task.rework_time += time_difference_seconds
             #employee_task.last_rework_start = None  # Сбрасываем время начала
             employee_task.last_rework_end = None  # Сбрасываем время окончания
+            employee_task.last_start_time = timezone.now()
             employee_task.save()
 
             return JsonResponse({"message": "Rework ended successfully"}, status=200)
@@ -966,3 +972,88 @@ def get_rework_timer(request):
         "task_id": task_id,
         "rework_time": current_rework_time,  # В секундах
     }, status=200)
+
+
+
+# Функция для автоматической паузы задач после окончания смены
+def pause_tasks_after_shift(employee_id):
+    from api.models import EmployeeModel, EmployeeTaskModel  # Импортируем внутри, чтобы избежать проблем с Django
+
+    try:
+        employee = EmployeeModel.objects.get(id=employee_id)
+
+
+        tasks = EmployeeTaskModel.objects.filter(employee=employee, is_finished=False, is_paused=False, is_started=True)
+
+        for task in tasks:
+            task.is_paused = True
+
+            task.save()
+
+        # Завершаем смену
+        employee.is_on_shift = False
+        employee.save()
+        print(f"Смена для сотрудника {employee_id} завершена. Все задачи поставлены на паузу.")
+
+    except EmployeeModel.DoesNotExist:
+        print(f"Ошибка: Сотрудник с id {employee_id} не найден.")
+    except Exception as e:
+        print(f"Ошибка завершения смены: {str(e)}")
+
+@api_view(['POST'])
+def start_shift(request):
+    """
+    API для выхода на смену сотрудника.
+    Рассчитывает время до конца смены и ставит задачи на паузу, когда смена заканчивается.
+    """
+    try:
+        data = request.data
+        employee_id = data.get('employee_id')
+
+        if not employee_id:
+            return JsonResponse({"error": "employee_id is required"}, status=400)
+
+
+        employee = EmployeeModel.objects.filter(id=employee_id).first()
+        if not employee:
+            return JsonResponse({"error": "Employee not found"}, status=404)
+
+
+        if employee.is_on_shift == True:
+            return JsonResponse({"message": "Employee is already on shift"}, status=400)
+
+
+        if not employee.shift_end:
+            return JsonResponse({"error": "Shift end time is not set for this employee"}, status=400)
+
+
+        employee.is_on_shift = True
+
+        employee.save()
+
+
+        current_time = now()
+        if is_naive(current_time):
+            current_time = make_aware(current_time, timezone=get_current_timezone())
+        today_date = current_time.date()
+
+        shift_end_time = make_aware(datetime.combine(today_date, employee.shift_end))
+
+
+
+
+
+
+        time_until_end = (shift_end_time - current_time).total_seconds()
+
+
+        Timer(time_until_end, pause_tasks_after_shift, args=[employee_id]).start()
+
+        return JsonResponse({
+            "message": "Shift started successfully",
+            "shift_end_time": shift_end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "time_until_end": int(time_until_end)
+        }, status=200)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

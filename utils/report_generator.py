@@ -366,7 +366,7 @@ def generate_her_report(employee_tasks):
         if is_naive(created_at):
             created_at = make_aware(created_at, timezone=current_tz)
         
-        finished_at = task.finished_at
+        finished_at = task.admin_finished_at
         if finished_at and is_naive(finished_at):
             finished_at = make_aware(finished_at, timezone=current_tz)
             
@@ -383,7 +383,7 @@ def generate_her_report(employee_tasks):
             task.id if task else "N/A",  # ID задачи
             task.created_at.strftime("%d.%m.%Y %H:%M:%S") if task and task.created_at else "Не указано",  # Дата постановки
             employee_task.start_time.strftime("%d.%m.%Y %H:%M:%S") if employee_task.start_time else "Не запущено",  # Дата запуска
-            task.finished_at.strftime("%d.%m.%Y %H:%M:%S") if task.finished_at else "не завершена",  # Дата завершения
+            task.admin_finished_at.strftime("%d.%m.%Y %H:%M:%S") if task.admin_finished_at else "не завершена",  # Дата завершения
             format_seconds(employee_task.useful_time) if employee_task.useful_time else "0:00:00",  # Полезное время
             format_seconds(employee_task.rework_time) if employee_task.rework_time else "0:00:00",  # Переделка
             format_seconds(employee_task.non_working_time) if employee_task.non_working_time else "0:00:00",  # Внерабочее время

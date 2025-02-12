@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views import EmployeeAuthView, end_task, start_rework, end_rework, start_useful_time, stop_useful_time, stop_non_working_time, get_rework_timer
+from .views import EmployeeAuthView, end_task, start_rework, end_rework, start_useful_time, stop_useful_time, stop_non_working_time, get_rework_timer, start_shift
 from utils.report_generator import ReportGenerator
 from .models import TaskModel
 urlpatterns = [
@@ -33,4 +33,5 @@ urlpatterns = [
     path('start-useful-time/', start_useful_time, name='start_useful_time'),
     path('stop-useful-time/', stop_useful_time, name='stop_useful_time'),
     path('get-rework-timer/', views.get_rework_timer, name='get_rework_timer'),
+    path('start-shift/', views.start_shift, name = 'start_shift'),
 ]

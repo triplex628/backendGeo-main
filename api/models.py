@@ -179,6 +179,7 @@ class TaskModel(models.Model):
     created_at = models.DateTimeField(verbose_name="Время создания", auto_now_add=True)
     finished_at = models.DateTimeField(verbose_name="Время завершения", null=True, blank=True) 
     manual_item_id = models.IntegerField(verbose_name="ID прибора", null=True, blank=True)
+    admin_finished_at = models.DateTimeField(verbose_name="Время завершения задачи администратором", null=True, blank=True)
     
     def __str__(self):
         return self.title
@@ -198,6 +199,7 @@ class EmployeeModel(models.Model):
     shift_start = models.TimeField(verbose_name="Начало смены", null=True, blank=True)
     shift_end = models.TimeField(verbose_name="Конец смены", null=True, blank=True)
     status = models.BooleanField(verbose_name="Занят", default=False, blank=True)
+    is_on_shift = models.BooleanField(verbose_name="На смене", default=False, blank=True)
     
     def __str__(self):
         return f"{self.surname} {self.name} {self.patronymic}"
