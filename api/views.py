@@ -765,6 +765,8 @@ def end_task(request):
             employee_task.is_started = False
             employee_task.is_finished = True
             employee.status =False
+            employee_task.is_useful = False
+            employee_task.is_reworking = False
             with transaction.atomic():  # Гарантируем целостность данных
                 #task.save()
                 employee.save()
@@ -804,6 +806,8 @@ def start_rework(request):
                 time_difference_seconds = int(time_difference.total_seconds())
                 employee_task.useful_time += time_difference_seconds
                 employee_task.last_start_time = None
+                employee_task.is_useful = False
+                employee_task.is_reworking = True
                 employee_task.save()
                 return JsonResponse({"message": "Rework started successfully"}, status=200)
             else:
@@ -853,6 +857,7 @@ def end_rework(request):
             #employee_task.last_rework_start = None  # Сбрасываем время начала
             employee_task.last_rework_end = None  # Сбрасываем время окончания
             employee_task.last_start_time = timezone.now()
+            employee_task.is_reworking = False
             employee_task.save()
 
             return JsonResponse({"message": "Rework ended successfully"}, status=200)
@@ -889,6 +894,7 @@ def start_useful_time(request):
             employee_task.is_pauseed = False
             employee_task.last_start_time = timezone.now()  
             #employee_task.start_time = timezone.now()
+            employee_task.is_useful = True
             employee_task.save()
 
             return JsonResponse({"message": "Useful time started successfully"}, status=200)
@@ -931,6 +937,7 @@ def stop_useful_time(request):
             employee_task.is_started = False
             #employee_task.is_paused = True
             employee_task.last_start_time = None  # Сбрасываем время последнего запуска
+            employee_task.is_useful = False
             employee_task.save()
 
             return JsonResponse({"message": "Useful time stopped successfully"}, status=200)
@@ -977,17 +984,39 @@ def get_rework_timer(request):
 
 # Функция для автоматической паузы задач после окончания смены
 def pause_tasks_after_shift(employee_id):
-    from api.models import EmployeeModel, EmployeeTaskModel  # Импортируем внутри, чтобы избежать проблем с Django
-
+    """
+    Ставит на паузу все активные задачи сотрудника в конце смены, обновляя переделку и полезное время.
+    """
     try:
         employee = EmployeeModel.objects.get(id=employee_id)
 
-
+        # Получаем все активные задачи сотрудника
         tasks = EmployeeTaskModel.objects.filter(employee=employee, is_finished=False, is_paused=False, is_started=True)
 
-        for task in tasks:
-            task.is_paused = True
+        # Текущее время
+        current_time = timezone.now()
 
+        for task in tasks:
+            # Обновление времени переделки (если переделка активна)
+            if task.is_reworking and task.last_rework_start:
+                rework_duration = (current_time - task.last_rework_start).total_seconds()
+                task.rework_time += int(rework_duration)
+                task.is_reworking = False  # Завершаем переделку
+                task.last_rework_start = None
+                print(f"Переделка завершена для задачи {task.id}, добавлено {int(rework_duration)} секунд")
+
+            # Обновление полезного времени (если активно)
+            if task.is_useful and task.last_start_time:
+                useful_duration = (current_time - task.last_start_time).total_seconds()
+                task.useful_time += int(useful_duration)
+                task.is_useful_time = False  # Завершаем полезное время
+                task.last_start_time = None
+                print(f"Полезное время завершено для задачи {task.id}, добавлено {int(useful_duration)} секунд")
+
+            # Ставим задачу на паузу
+            task.is_paused = True
+            task.is_started = False
+            task.paused_message = "Автоматическая пауза после смены"
             task.save()
 
         # Завершаем смену
@@ -999,6 +1028,7 @@ def pause_tasks_after_shift(employee_id):
         print(f"Ошибка: Сотрудник с id {employee_id} не найден.")
     except Exception as e:
         print(f"Ошибка завершения смены: {str(e)}")
+
 
 @api_view(['POST'])
 def start_shift(request):
@@ -1027,9 +1057,7 @@ def start_shift(request):
             return JsonResponse({"error": "Shift end time is not set for this employee"}, status=400)
 
 
-        employee.is_on_shift = True
 
-        employee.save()
 
 
         current_time = now()
@@ -1037,11 +1065,19 @@ def start_shift(request):
             current_time = make_aware(current_time, timezone=get_current_timezone())
         today_date = current_time.date()
 
+        shift_start_time = make_aware(datetime.combine(today_date, employee.shift_start))
         shift_end_time = make_aware(datetime.combine(today_date, employee.shift_end))
 
+        if current_time < shift_start_time:
+            return JsonResponse({"error": "Shift has not started yet"}, status=400)
 
+        
+        if current_time >= shift_end_time:
+            return JsonResponse({"error": "Shift is already over"}, status=400)
 
-
+      
+        employee.is_on_shift = True
+        employee.save()
 
 
         time_until_end = (shift_end_time - current_time).total_seconds()

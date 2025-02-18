@@ -236,6 +236,8 @@ class EmployeeTaskModel(models.Model):
     last_rework_end = models.DateTimeField(verbose_name="Время конца переделки", null=True, blank=True)  
     last_non_working_start = models.DateTimeField(verbose_name="Время начала внерабочего вермени", null=True, blank=True)
     last_non_working_end = models.DateTimeField(verbose_name="Время конца внерабочего времени", null=True, blank=True)
+    is_useful = models.BooleanField(verbose_name="Полезная", default=False)
+    is_reworking = models.BooleanField(verbose_name="Переделка", default=False)
 
     def __str__(self):
         return f"{self.task} {self.employee}"
