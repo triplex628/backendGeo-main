@@ -768,6 +768,7 @@ def end_task(request):
             employee_task.is_useful = False
             employee_task.is_reworking = False
             employee_task.end_time = end_time
+            employee_task.paused_message = "Завершено"
             with transaction.atomic():  # Гарантируем целостность данных
                 #task.save()
                 employee.save()
