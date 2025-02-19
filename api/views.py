@@ -413,35 +413,34 @@ def choose_task(request, *args, **kwargs):
     task = get_object_or_404(models.TaskModel, id=task_id)
     item = get_object_or_404(models.ItemModel, id=item_id)
 
-    employee_task = models.EmployeeTaskModel.objects.filter(employee=employee, is_finished=False).first()
+    employee_task = models.EmployeeTaskModel.objects.filter(
+    employee=employee,
+    task=task,
+    is_finished=False
+    ).first()
 
-    # if employee_task is not None:
-    #     serializer = serializers.EmployeeTaskSerializer(employee_task)
-    #     serialized_data = serializer.data
-    #     return Response(data={"message": f"Task is already assigned to {serialized_data}"}, status=status.HTTP_409_CONFLICT)
+    if employee_task:
+        # ✅ Если задача уже назначена — возвращаем существующую задачу без создания новой
+        serializer = serializers.EmployeeTaskSerializer(employee_task)
+        return Response(
+            data={"message": "Task already assigned to this employee", "employee_task": serializer.data},
+            status=status.HTTP_200_OK
+        )
 
-    employee_task = models.EmployeeTaskModel(
+    # ✅ Если активной задачи нет — создаем новую
+    employee_task = models.EmployeeTaskModel.objects.create(
         employee=employee,
         task=task,
         item=item,
         employee_comment=comment,
-        admin_id=admin_id  # Устанавливаем admin_id при создании employee_task
+        admin_id=admin_id,
+        start_time=timezone.now(),  # Можно сразу указать время начала
+        is_started=False,
+        is_finished=False
     )
-    # if employee_task.start_time is None:
-    #     employee_task.start_time = datetime.now()
-
-    # # if employee_task.end_time is None:
-    # #     employee_task.end_time = datetime.now()
-
-    
-
-
-    employee_task.save()
 
     serializer = serializers.EmployeeTaskSerializer(employee_task)
-    serialized_data = serializer.data
-
-    return Response({"message": serialized_data}, status=status.HTTP_200_OK)
+    return Response({"message": serializer.data}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 def sign_in(request, *args, **kwargs):
@@ -762,11 +761,13 @@ def end_task(request):
             #     time_difference = task.finished_at - task.created_at
             #     employee_task.total_time = int(time_difference.total_seconds())
             employee = EmployeeModel.objects.filter(id=employee_task.employee_id).first()
+            employee_task.total_time = end_time - employee_task.start_time
             employee_task.is_started = False
             employee_task.is_finished = True
             employee.status =False
             employee_task.is_useful = False
             employee_task.is_reworking = False
+            employee_task.end_time = end_time
             with transaction.atomic():  # Гарантируем целостность данных
                 #task.save()
                 employee.save()
@@ -798,28 +799,26 @@ def start_rework(request):
             if not employee_task:
                 return JsonResponse({"error": "EmployeeTaskModel not found"}, status=404)
 
-            # Установка времени начала переделки
             current_time = timezone.now()
-            employee_task.last_rework_start = current_time
-            if not employee_task.is_paused and not employee_task.is_finished and employee_task.is_started:
+            # Если шло полезное время — добавляем его и сбрасываем
+            if employee_task.is_useful and employee_task.last_start_time:
                 time_difference = current_time - employee_task.last_start_time
-                time_difference_seconds = int(time_difference.total_seconds())
-                employee_task.useful_time += time_difference_seconds
+                employee_task.useful_time += int(time_difference.total_seconds())
                 employee_task.last_start_time = None
                 employee_task.is_useful = False
-                employee_task.is_reworking = True
-                employee_task.save()
-                return JsonResponse({"message": "Rework started successfully"}, status=200)
-            else:
-                return JsonResponse({"error": "Задача уже завершена или еще не начата"}, status=404)
+
+            # Запуск переделки
+            employee_task.last_rework_start = current_time
+            employee_task.is_reworking = True
             employee_task.save()
 
-            
+            return JsonResponse({"message": "Rework started successfully"}, status=200)
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse({"error": "Invalid request method"}, status=405)
+
 
 
 @api_view(['POST'])
@@ -843,21 +842,18 @@ def end_rework(request):
             if not employee_task.last_rework_start:
                 return JsonResponse({"error": "Rework start time not set"}, status=400)
 
-            # Установка времени окончания переделки
-            currnt_time = timezone.now()
-            employee_task.last_rework_end = currnt_time
-
-            # Вычисление разницы времени
-            
-            time_difference = employee_task.last_rework_end - employee_task.last_rework_start
+            current_time = timezone.now()
+            time_difference = current_time - employee_task.last_rework_start
             time_difference_seconds = int(time_difference.total_seconds())
 
-            # Обновление общего времени переделки
+            # Добавляем время переделки и сбрасываем поля
             employee_task.rework_time += time_difference_seconds
-            #employee_task.last_rework_start = None  # Сбрасываем время начала
-            employee_task.last_rework_end = None  # Сбрасываем время окончания
-            employee_task.last_start_time = timezone.now()
+            employee_task.last_rework_start = None
             employee_task.is_reworking = False
+
+            # Возвращаем задачу в состояние полезного времени
+            employee_task.last_start_time = current_time
+            employee_task.is_useful = True
             employee_task.save()
 
             return JsonResponse({"message": "Rework ended successfully"}, status=200)
@@ -866,6 +862,7 @@ def end_rework(request):
             return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse({"error": "Invalid request method"}, status=405)
+
 
 @api_view(['POST'])
 def start_useful_time(request):
