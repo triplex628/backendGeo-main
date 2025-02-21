@@ -371,9 +371,38 @@ class EmployeeTaskView(ListAPIView):
             employee_task.total_time = time
         
         serializer = self.get_serializer(employee_task)
+
+        employee_task = models.EmployeeTaskModel.objects.filter(
+            employee=employee,
+            task=task,
+            is_finished=False
+        ).first()
+
+        current_time = timezone.now()
+
+        if (employee_task.is_useful == True) and (employee_task.last_start_time):
+            time_diff = (current_time - employee_task.last_start_time).total_seconds()
+            employee_task.useful_time = (employee_task.useful_time or 0) + time_diff
+            employee_task.last_start_time = current_time
+
+        if (employee_task.is_reworking == True) and (employee_task.last_rework_start):
+            time_diff = (current_time - employee_task.last_rework_start).total_seconds()
+            employee_task.rework_time = (employee_task.rework_time or 0) + time_diff
+            employee_task.last_rework_start = current_time
+
+        if (employee_task.is_after_shift_work == True) and (employee_task.last_non_working_start):
+            time_diff = (current_time - employee_task.last_non_working_start).total_seconds()
+            employee_task.non_working_time = (employee_task.non_working_time or 0) + time_diff
+            employee_task.last_non_working_start = current_time
+
+        # serializer = self.get_serializer(employee_task, data=request.data)
+        # serializer.is_valid(raise_exception=True)
+        # serializer.update(employee_task, serializer.validated_data)
+        # serializer.save()
+        employee_task.save()
+
         return Response(data=serializer.data, status=status.HTTP_200_OK)
 
-    @transaction.atomic
     def put(self, request, *args, **kwargs):
         task_id = self.request.query_params.get('task_id')
         employee_id = self.request.query_params.get('employee_id')
@@ -387,28 +416,10 @@ class EmployeeTaskView(ListAPIView):
             is_finished=False
         ).first()
 
-        current_time = timezone.now()
-
-        if employee_task.is_useful and employee_task.last_start_time:
-            time_diff = (current_time - employee_task.last_start_time).total_seconds()
-            employee_task.useful_time = (employee_task.useful_time or 0) + time_diff
-            employee_task.last_start_time = current_time
-
-        if employee_task.is_reworking and employee_task.last_rework_start:
-            time_diff = (current_time - employee_task.last_rework_start).total_seconds()
-            employee_task.rework_time = (employee_task.rework_time or 0) + time_diff
-            employee_task.last_rework_start = current_time
-
-        if employee_task.is_after_shift and employee_task.last_non_working_start:
-            time_diff = (current_time - employee_task.last_non_working_start).total_seconds()
-            employee_task.non_working_time = (employee_task.non_working_time or 0) + time_diff
-            employee_task.last_non_working_start = current_time
-
         serializer = self.get_serializer(employee_task, data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.update(employee_task, serializer.validated_data)
         serializer.save()
-
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
