@@ -647,6 +647,7 @@ def check_shift(request):
                 # Вызов сделан вне рабочей смены
                 if not employee_task.last_non_working_start:
                     employee_task.last_non_working_start = now()  # Записываем текущее время как начало
+                    employee_task.is_after_shift_work = True
                 employee_task.save()
                 return Response(
                     {"message": "Продолжение работы вне рабочей смены успешно записано."},
@@ -693,6 +694,7 @@ def stop_non_working_time(request):
 
         # Сбрасываем last_non_working_start
         employee_task.last_non_working_start = None
+        employee_task.is_after_shift_work = False
         employee_task.save()
 
         # Формируем ответ
@@ -767,6 +769,7 @@ def end_task(request):
             employee.status =False
             employee_task.is_useful = False
             employee_task.is_reworking = False
+            employee_task.is_after_shift_work = False
             employee_task.end_time = end_time
             employee_task.paused_message = "Завершено"
             with transaction.atomic():  # Гарантируем целостность данных
