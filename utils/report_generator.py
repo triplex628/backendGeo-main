@@ -45,8 +45,8 @@ class ReportGenerator:
             #     created_at = make_aware(created_at, timezone=get_current_timezone())
 
             finished_at = task.admin_finished_at if task.admin_finished_at else None
-            if finished_at and is_naive(finished_at):
-                finished_at = make_aware(finished_at, timezone=get_current_timezone())
+            # if finished_at and is_naive(finished_at):
+            #     finished_at = make_aware(finished_at, timezone=get_current_timezone())
 
 
 
@@ -153,8 +153,8 @@ class ReportGenerator:
             #     created_at = make_aware(created_at, timezone=get_current_timezone())
 
             finished_at = task.admin_finished_at if task.admin_finished_at else None
-            if finished_at and is_naive(finished_at):
-                finished_at = make_aware(finished_at, timezone=get_current_timezone())
+            # if finished_at and is_naive(finished_at):
+            #     finished_at = make_aware(finished_at, timezone=get_current_timezone())
 
 
 
@@ -233,7 +233,7 @@ class ReportGenerator:
                 
                 sheet.cell(row=row, column=1).value = "ИТОГ:"
                 sheet.cell(row=row, column=1).font = Font(bold=True)
-                sheet.cell(row=row, column=6).value = f"{total_duration_hours:.2f} ч"
+                sheet.cell(row=row, column=6).value = f"{total_time} ч"
                 sheet.cell(row=row, column=6).font = Font(bold=True)
                 row += 1
 
@@ -273,8 +273,8 @@ class ReportGenerator:
             #     created_at = make_aware(created_at, timezone=get_current_timezone())
 
             finished_at = task.admin_finished_at if task.admin_finished_at else None
-            if finished_at and is_naive(finished_at):
-                finished_at = make_aware(finished_at, timezone=get_current_timezone())
+            # if finished_at and is_naive(finished_at):
+            #     finished_at = make_aware(finished_at, timezone=get_current_timezone())
 
 
 
@@ -451,7 +451,7 @@ def generate_her_report(employee_tasks):
             format_seconds(employee_task.useful_time) if employee_task.useful_time else "0:00:00",  # Полезное время
             format_seconds(employee_task.rework_time) if employee_task.rework_time else "0:00:00",  # Переделка
             format_seconds(employee_task.non_working_time) if employee_task.non_working_time else "0:00:00",  # Внерабочее время
-            format_seconds(total_seconds),  # Общее время
+            total_seconds if finished_at else format_seconds(total_seconds) ,  # Общее время
         ]
         sheet.append(row)
     # Автоматическая подгонка ширины столбцов
