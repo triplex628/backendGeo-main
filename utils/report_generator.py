@@ -449,6 +449,15 @@ def generate_her_report(employee_tasks):
             total_seconds if finished_at else format_seconds(total_seconds) ,  # Общее время
         ]
         sheet.append(row)
+        # Определяем колонку "Общее время" (последняя колонка в row)
+        last_col = len(headers)
+
+        # Берем последнюю заполненную строку
+        last_row = sheet.max_row  
+
+        # Применяем выравнивание только к ячейке "Общее время" в последней строке
+        sheet.cell(row=last_row, column=last_col).alignment = Alignment(horizontal="right", vertical="center")
+
     # Автоматическая подгонка ширины столбцов
     for col_num, column_cells in enumerate(sheet.columns, start=1):
         max_length = 0
