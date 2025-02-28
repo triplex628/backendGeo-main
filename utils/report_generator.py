@@ -21,14 +21,14 @@ class ReportGenerator:
         """
         Генерация листа 'Отчет по задачам'
         """
-        tasks = TaskModel.objects.filter(created_at__lte=end_time)
+        
         sheet.title = "Отчет по задачам"
-        column_widths = [5, 30, 20, 20, 15, 20, 20, 30, 15]
+        column_widths = [5, 30, 20, 20, 15, 20, 20, 20, 30, 15]
         for col_num, width in enumerate(column_widths, start=1):
             sheet.column_dimensions[get_column_letter(col_num)].width = width
 
         headers = ["№", "Задача", "Дата постановки", "Дата завершения", "ID задачи", 
-                    "Потраченное время", "Переделка", "Сотрудники", "Статус"]
+                    "Общее время","Полезное время", "Переделка", "Сотрудники", "Статус"]
 
         
         
@@ -39,14 +39,22 @@ class ReportGenerator:
 
         # Стартовая строка
         row = 2
-        for task_index, task in enumerate(tasks, start=1):
-            created_at = task.created_at
-            # if is_naive(created_at):
-            #     created_at = make_aware(created_at, timezone=get_current_timezone())
 
-            finished_at = task.admin_finished_at if task.admin_finished_at else None
-            # if finished_at and is_naive(finished_at):
-            #     finished_at = make_aware(finished_at, timezone=get_current_timezone())
+
+            
+
+
+        for task_index, task in enumerate(employee_tasks, start=1):
+
+            task_title = task.task.title if task.task else "Не указано"
+            start_time = task.start_time.strftime("%d.%m.%Y") if task.start_time else ""
+            end_time = task.end_time.strftime("%d.%m.%Y") if task.end_time else "не завершена"
+            # total_time = format_seconds(task.total_time) if task.total_time else "0:00:00"
+            rework_time = format_seconds(task.rework_time) if task.rework_time else "0:00:00"
+            useful_time = format_seconds(task.useful_time) if task.useful_time else "0:00:00"
+            tasks = task.task
+            created_at = tasks.created_at if tasks else None
+            finished_at = tasks.admin_finished_at if task and tasks.admin_finished_at else None
 
 
 
@@ -61,46 +69,35 @@ class ReportGenerator:
             employees = []
             statuses = []
 
-            for task_index, task in enumerate(employee_tasks, start=1):
-                
-                task_title = task.task.title if task.task else "Не указано"
-                start_time = task.start_time.strftime("%d.%m.%Y") if task.start_time else ""
-                end_time = task.end_time.strftime("%d.%m.%Y") if task.end_time else "не завершена"
-                # total_time = format_seconds(task.total_time) if task.total_time else "0:00:00"
-                rework_time = format_seconds(task.rework_time) if task.rework_time else "0:00:00"
+            for employee_task in EmployeeTaskModel.objects.filter(task=task.task):
+                employee_name = f"{employee_task.employee.name} {employee_task.employee.surname}"
+                employees.append(employee_name)
 
-                
-                employees = []
-                statuses = []
+                # Определяем статус
+                if employee_task.paused_message == "Ожидание по браку":
+                    statuses.append("Закончено по браку")
+                elif employee_task.paused_message == "Ожидание по комплектующим":
+                    statuses.append("Закончена по недостатку комплектующих")
+                elif employee_task.end_time:
+                    statuses.append("Работа завершена")
+                else:
+                    statuses.append("В работе")
 
-                for employee_task in EmployeeTaskModel.objects.filter(task=task.task):
-                    employee_name = f"{employee_task.employee.name} {employee_task.employee.surname}"
-                    employees.append(employee_name)
+        
+            sheet.cell(row=row, column=1).value = task_index  # №
+            sheet.cell(row=row, column=2).value = task_title  # Задача
+            sheet.cell(row=row, column=3).value = start_time  # Дата постановки
+            sheet.cell(row=row, column=4).value = end_time  # Дата завершения
+            sheet.cell(row=row, column=5).value = task.task.id if task.task else "N/A"  # ID задачи
+            sheet.cell(row=row, column=6).value = total_time  # Потраченное время
+            sheet.cell(row=row, column=7).value = useful_time  # Полезное время
+            sheet.cell(row=row, column=8).value = rework_time  # Переделка
+            sheet.cell(row=row, column=9).value = "\n".join(employees)  # Сотрудники
+            sheet.cell(row=row, column=9).alignment = Alignment(wrap_text=True, vertical="top")
+            sheet.cell(row=row, column=10).value = "\n".join(statuses)  # Статус
+            sheet.cell(row=row, column=10).alignment = Alignment(wrap_text=True, vertical="top")
 
-                    # Определяем статус
-                    if employee_task.paused_message == "Ожидание по браку":
-                        statuses.append("Закончено по браку")
-                    elif employee_task.paused_message == "Ожидание по комплектующим":
-                        statuses.append("Закончена по недостатку комплектующих")
-                    elif employee_task.end_time:
-                        statuses.append("Работа завершена")
-                    else:
-                        statuses.append("В работе")
-
-            
-                sheet.cell(row=row, column=1).value = task_index  # №
-                sheet.cell(row=row, column=2).value = task_title  # Задача
-                sheet.cell(row=row, column=3).value = start_time  # Дата постановки
-                sheet.cell(row=row, column=4).value = end_time  # Дата завершения
-                sheet.cell(row=row, column=5).value = task.task.id if task.task else "N/A"  # ID задачи
-                sheet.cell(row=row, column=6).value = total_time  # Потраченное время
-                sheet.cell(row=row, column=7).value = rework_time  # Переделка
-                sheet.cell(row=row, column=8).value = "\n".join(employees)  # Сотрудники
-                sheet.cell(row=row, column=8).alignment = Alignment(wrap_text=True, vertical="top")
-                sheet.cell(row=row, column=9).value = "\n".join(statuses)  # Статус
-                sheet.cell(row=row, column=9).alignment = Alignment(wrap_text=True, vertical="top")
-
-                row += 1
+            row += 1
 
 
 
@@ -116,19 +113,19 @@ class ReportGenerator:
         logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
         
-        column_widths = [5, 15, 20, 20, 20, 30, 30, 25, 30]
+        column_widths = [5, 15, 20, 20, 20, 30, 30, 30, 25, 30]
         for col_num, width in enumerate(column_widths, start=1):
             sheet.column_dimensions[get_column_letter(col_num)].width = width
 
        
         headers = ["№", "ID прибора", "Дата начала работы", "Дата окончания работы", "Тип работы",
-                "Продолжительность работы (общая)", "Переделка (кол-во времени)", "Сотрудник", "Комментарий"]
+                "Общее время","Полезное время", "Переделка", "Сотрудник", "Комментарий"]
 
         try:
             
             employee_tasks = EmployeeTaskModel.objects.filter(
                 start_time__gte=start_time,
-                end_time__lte=end_time
+                
             )
             logging.debug(f"Фильтрация задач успешна. Найдено {len(employee_tasks)} задач.")
         except Exception as e:
@@ -146,28 +143,7 @@ class ReportGenerator:
 
         # Стартовая строка
         row = 1
-        tasks = TaskModel.objects.filter(created_at__lte=end_time)
-        for task_index, task in enumerate(tasks, start=1):
-            created_at = task.created_at
-            # if is_naive(created_at):
-            #     created_at = make_aware(created_at, timezone=get_current_timezone())
 
-            finished_at = task.admin_finished_at if task.admin_finished_at else None
-            # if finished_at and is_naive(finished_at):
-            #     finished_at = make_aware(finished_at, timezone=get_current_timezone())
-
-
-
-            # Расчет общего времени
-            if finished_at:
-                total_seconds = (finished_at - created_at).total_seconds()
-            else:
-                total_seconds = (now() - created_at).total_seconds() if created_at else 0
-
-            total_time = format_seconds(total_seconds)
-            
-            employees = []
-            statuses = []
 
         for item_title, tasks in tasks_by_item.items():
             try:
@@ -186,15 +162,31 @@ class ReportGenerator:
                 row += 1
 
                 
-                total_duration_seconds = sum(
-                    [et.total_time if et.total_time else 0 for et in tasks],  
-                    0
-                )
-                total_duration_hours = total_duration_seconds / 3600  # Преобразуем в часы
+                total_duration_seconds = 0  # Общее время всех задач прибора
+
+                for employee_task in tasks:
+                    task = employee_task.task  # Берем связанную задачу
+
+                    # ✅ Берем даты из TaskModel (task)
+                    created_at = task.created_at if task else None
+                    finished_at = task.admin_finished_at if task and task.admin_finished_at else None
+
+
+                    # ✅ Расчет общего времени
+                    if finished_at:
+                        task_seconds = (finished_at - created_at).total_seconds()
+                    else:
+                        task_seconds = (now() - created_at).total_seconds() if created_at else 0
+
+                    total_duration_seconds += task_seconds  # Добавляем к общей продолжительности
+
+                # ✅ Конвертируем в часы
+                total_duration_hours = total_duration_seconds / 3600
                 logging.debug(f"Общая продолжительность для '{item_title}': {total_duration_hours:.2f} ч.")
 
 
-                
+
+                total_dur_seconds = 0
                 for task_index, employee_task in enumerate(tasks, start=1):
                     task = employee_task.task
                     item = employee_task.item
@@ -206,10 +198,23 @@ class ReportGenerator:
                         comment = "Закончено по браку"
                     elif paused_message == "Ожидание по комплектующим":
                         comment = "Закончена по недостатку комплектующих"
-                    elif end_time:
+                    elif paused_message == "Завершено":
                         comment = "Работа завершена"
-                    else:
+                    elif paused_message == "В работе":
                         comment = "В работе"
+
+                    created_at = task.created_at if task else None
+                    finished_at = task.admin_finished_at if task and task.admin_finished_at else None
+
+                    if finished_at:
+                        total_seconds = (finished_at - created_at).total_seconds()
+                    else:
+                        total_seconds = (now() - created_at).total_seconds() if created_at else 0
+
+                    total_time = format_seconds(total_seconds) 
+
+                    
+                    total_dur_seconds += total_seconds
 
                     # Вычисляем безопасное время окончания задачи
                     end_times = [et.end_time for et in tasks if et.end_time]
@@ -222,18 +227,19 @@ class ReportGenerator:
                     sheet.cell(row=row, column=4).value = end_time_task.strftime("%d.%m.%Y") if end_time_task else "не завершена"
                     sheet.cell(row=row, column=5).value = task.get_type_of_task_display() if hasattr(task, 'get_type_of_task_display') else task.type_of_task  # Тип работы
                     sheet.cell(row=row, column=6).value = total_time # Общая продолжительность
-                    sheet.cell(row=row, column=7).value = format_seconds(employee_task.rework_time) if employee_task.rework_time else "0:00:00" # Время на переделку
-                    sheet.cell(row=row, column=8).value = f"{employee_task.employee.name} {employee_task.employee.surname}"  # Сотрудник
-                    sheet.cell(row=row, column=9).value = comment  # Комментарий
+                    sheet.cell(row=row, column=7).value = format_seconds(employee_task.useful_time) if employee_task.useful_time else "0:00:00" # Полезное время
+                    sheet.cell(row=row, column=8).value = format_seconds(employee_task.rework_time) if employee_task.rework_time else "0:00:00" # Время на переделку
+                    sheet.cell(row=row, column=9).value = f"{employee_task.employee.name} {employee_task.employee.surname}"  # Сотрудник
+                    sheet.cell(row=row, column=10).value = comment  # Комментарий
                     row += 1
 
                 # отступ
                 row += 5
 
-                
+                total_hours = format_seconds(total_dur_seconds)
                 sheet.cell(row=row, column=1).value = "ИТОГ:"
                 sheet.cell(row=row, column=1).font = Font(bold=True)
-                sheet.cell(row=row, column=6).value = f"{total_time} ч"
+                sheet.cell(row=row, column=6).value = f"{total_hours} ч"
                 sheet.cell(row=row, column=6).font = Font(bold=True)
                 row += 1
 
@@ -255,39 +261,17 @@ class ReportGenerator:
         sheet.title = "По сотрудникам"
 
         
-        column_widths = [5, 15, 30, 20, 20, 20, 15, 20, 20]
+        column_widths = [5, 15, 30, 20, 20, 20, 20, 15, 20, 20]
         for col_num, width in enumerate(column_widths, start=1):
             sheet.column_dimensions[get_column_letter(col_num)].width = width
 
         
         headers = ["№", "ID Задачи", "Задача", "Дата взятия", "Дата окончания",
-                "Потраченное время", "Переделка", "Статус работы"]
+                "Общее время","Полезное время", "Переделка", "Статус работы"]
         
         
         row = 1
 
-        tasks = TaskModel.objects.filter(created_at__lte=end_time)
-        for task_index, task in enumerate(tasks, start=1):
-            created_at = task.created_at
-            # if is_naive(created_at):
-            #     created_at = make_aware(created_at, timezone=get_current_timezone())
-
-            finished_at = task.admin_finished_at if task.admin_finished_at else None
-            # if finished_at and is_naive(finished_at):
-            #     finished_at = make_aware(finished_at, timezone=get_current_timezone())
-
-
-
-            # Расчет общего времени
-            if finished_at:
-                total_seconds = (finished_at - created_at).total_seconds()
-            else:
-                total_seconds = (now() - created_at).total_seconds() if created_at else 0
-
-            total_time = format_seconds(total_seconds)
-            
-            employees = []
-            statuses = []
         employees = EmployeeModel.objects.all()
 
         for employee in employees:
@@ -307,20 +291,31 @@ class ReportGenerator:
 
             
             employee_tasks = EmployeeTaskModel.objects.filter(
-                employee=employee, start_time__gte=start_time, end_time__lte=end_time
+                employee=employee, start_time__gte=start_time
             )
 
             if employee_tasks.exists():
                 for task_index, task in enumerate(employee_tasks, start=1):
-                    
+                    tasks = task.task
+
+                    created_at = tasks.created_at if tasks else None
+                    finished_at = tasks.admin_finished_at if tasks and tasks.admin_finished_at else None
+
+                    if finished_at:
+                        total_seconds = (finished_at - created_at).total_seconds()
+                    else:
+                        total_seconds = (now() - created_at).total_seconds() if created_at else 0
+
+                    total_time = format_seconds(total_seconds)
                     sheet.cell(row=row, column=1).value = task_index  # №
                     sheet.cell(row=row, column=2).value = task.task.id if task.task else "N/A"  # ID Задачи
                     sheet.cell(row=row, column=3).value = task.task.title if task.task else "N/A"  # Задача
                     sheet.cell(row=row, column=4).value = task.start_time.strftime("%d.%m.%Y") if task.start_time else "N/A"  # Дата взятия
                     sheet.cell(row=row, column=5).value = task.end_time.strftime("%d.%m.%Y") if task.end_time else "N/A"  # Дата окончания
                     sheet.cell(row=row, column=6).value = total_time # Потраченное время
-                    sheet.cell(row=row, column=7).value = format_seconds(task.rework_time) if task.rework_time else "0:00:00"  # Переделка
-                    sheet.cell(row=row, column=8).value = self.get_task_status(task)  # Статус работы
+                    sheet.cell(row=row, column=7).value = format_seconds(task.useful_time) if task.useful_time else "0:00:00"  # Полезное время
+                    sheet.cell(row=row, column=8).value = format_seconds(task.rework_time) if task.rework_time else "0:00:00"  # Переделка
+                    sheet.cell(row=row, column=9).value = self.get_task_status(task)  # Статус работы
                     row += 1
             else:
                 
@@ -356,7 +351,7 @@ class ReportGenerator:
 
         # Генерация первого листа
         sheet1 = workbook.active
-        self.generate_task_sheet(sheet1, EmployeeTaskModel.objects.filter(start_time__gte=start_time, end_time__lte=end_time), end_time)
+        self.generate_task_sheet(sheet1, EmployeeTaskModel.objects.filter(start_time__gte=start_time), end_time)
 
 
         # Генерация второго листа
